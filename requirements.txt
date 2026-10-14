@@ -1,0 +1,9 @@
+flask
+flask-cors
+numpy
+pandas
+psycopg2-binary
+requests
+scikit-learn
+scipy
+streamlit
