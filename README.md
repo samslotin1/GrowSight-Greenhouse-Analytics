@@ -1,572 +1,226 @@
-# GrowSight 🌱
-### Greenhouse Growth & Risk Analytics Platform
+# GrowSight
+### Greenhouse Analytics & Decision-Support Platform
 
-GrowSight is a data analytics project designed to analyze greenhouse crop performance, identify high-risk growing batches, and explore environmental factors that may contribute to plant loss.
+GrowSight is an end-to-end **greenhouse analytics portfolio project** designed to help growers identify production batches that need attention and investigate possible environmental contributors to plant loss—without needing to inspect every batch in person.
 
-The project combines **SQL, PostgreSQL, BigQuery, Python, APIs, machine learning, and Power BI** into a small end-to-end analytics workflow.
+The finished local prototype brings together **Python, PostgreSQL, SQL, Google BigQuery, Power BI, live simulated temperature readings, and a locally hosted AI assistant**. It also includes historical weather enrichment and an exploratory machine-learning component.
 
-The main goal is to answer a practical greenhouse management question:
+> **Core question:** Which greenhouse batches need attention, and what environmental conditions might explain their losses?
 
-> **Which growing batches require attention, and what environmental factors may be contributing to plant loss?**
+**Project status:** Completed portfolio/demo prototype. It uses simulated greenhouse production and sensor data, not readings from deployed physical sensors. It is not a validated commercial greenhouse-control or predictive-alert system.
 
----
+## At a glance
 
-# Project Overview
+| Metric | Project result |
+| --- | ---: |
+| Simulated production batches | 150 |
+| High-risk batches | 19 |
+| Low-risk batches | 131 |
+| Average batch loss rate (project snapshot) | ~6.80% |
+| Crop species | 3 |
+| Greenhouse zones | 3 |
+| Simulated temperature update interval | ~5 seconds |
 
-GrowSight simulates greenhouse production data across multiple crop species and growing zones.
+These figures are from the project's reference dataset and may vary with report filters or subsequent data updates.
 
-The project analyzes:
+## Features
 
-- Plant loss rates
-- Temperature
-- Irrigation
-- Greenhouse zones
-- Crop species
-- High-risk production batches
-- External weather conditions
+### 1. Interactive Power BI dashboard
 
-The final output is an interactive **Power BI dashboard** that allows users to investigate greenhouse performance and identify potentially problematic batches.
+The dashboard supports greenhouse monitoring and investigation through multiple report pages:
 
----
+- **Overview:** Total Batches, Batches Requiring Attention, Average Loss Rate, filters for crop species, greenhouse zone and risk level, plus monitoring cards.
+- **Risk Drivers:** Visual exploration of temperature, irrigation and loss-rate patterns to help identify conditions worth investigating.
+- **Batch Investigation:** Drill into a selected batch to review its zone, crop, temperature, irrigation, loss rate and risk classification.
+- **Live Current Temperature:** A zone-filterable card displaying the latest temperature value supplied by the sensor simulation pipeline. The local demo was configured to update approximately every five seconds.
+- **Average pH and Average EC:** Additional environmental metric cards included in the finished report.
 
-# Technologies Used
+The dashboard uses a dark theme with high-contrast green accents. Its risk labels are based on **observed batch losses**, not an independently validated prediction of future losses.
 
-## Data & SQL
+### 2. Simulated live sensor pipeline
 
-- PostgreSQL
-- SQL
-- BigQuery
-- Star schema / dimensional modeling
+A Python sensor simulator generates changing environmental observations for the three zones and stores readings in PostgreSQL's `sensor_readings` table. Fields include:
 
-## Python
+- Timestamp and zone ID
+- Temperature (°C)
+- Relative humidity (%)
+- pH
+- Electrical conductivity (EC)
 
-- Python
-- pandas
-- NumPy
-- scikit-learn
-- API requests
+**Current live display:** Temperature is the live-updating reading surfaced in Power BI. Other simulator fields support the broader local data pipeline; they should not be interpreted as confirmed live-updating Power BI visualizations.
 
-## Visualization
+This simulates a real monitoring workflow without requiring greenhouse hardware.
 
-- Power BI
+### 3. AskGrowSight: local AI assistant
 
-## External Data
+AskGrowSight is a greenhouse-focused chatbot integrated into the Power BI experience through a custom visual. It uses:
 
-- Open-Meteo Weather API
+- **Flask** for the local HTTP API (`POST /ask`)
+- **Ollama** to run **Qwen3 4B** locally
+- **PostgreSQL** connectivity through `psycopg2` to support database-aware responses
+- A custom **Power BI visual** for entering questions and viewing answers
 
----
+The assistant is designed to answer greenhouse and GrowSight questions, such as interpreting pH, EC, temperature and plant-loss thresholds, and to use project data where supported by its implemented database functions. Its responses are decision support, not autonomous greenhouse actions.
 
-# Dataset
+**Local-only setup:** The demonstrated API ran at `http://127.0.0.1:5000` and Ollama at `http://127.0.0.1:11434`. This is not a publicly hosted AI service. The API, database, and Ollama process need to be running for the assistant to work.
 
-The GrowSight dataset contains **150 simulated greenhouse production batches**.
+### 4. SQL analytics and batch risk classification
 
-Each batch contains information including:
+PostgreSQL is used for local storage, transformations, and analysis. BigQuery was also used as part of the warehouse and analytical workflow.
 
-- Batch ID
-- Crop species
-- Greenhouse zone
-- Plants planted
-- Plants lost
-- Irrigation amount
-- Greenhouse temperature
-- Production date
+The project uses a dimensional design with:
 
-The crops included are:
+| Table | Role |
+| --- | --- |
+| `staging_growth` | Original batch-level production records |
+| `dim_species` | Crop information |
+| `dim_zone` | Greenhouse zone information |
+| `dim_date` | Date attributes |
+| `fact_growth` | Production measurements |
+| `sensor_readings` | Timestamped simulated environmental observations |
 
-- Tomato
-- Cucumber
-- Pepper
+Key analytical objects include:
 
-The greenhouse zones include:
+- `batch_risk_analysis` — computes plant-loss percentage and classifies risk.
+- `top_risk_batches_by_zone` — ranks higher-loss batches within zones.
+- `batch_risk_snapshot` — stored reporting snapshot.
 
-- North Glasshouse
-- South Tunnel
-- Propagation Room
-
----
-
-# Data Architecture
-
-GrowSight uses a simple dimensional warehouse structure.
-
-## Dimension Tables
-
-### `dim_species`
-
-Contains information about crop species.
-
-### `dim_zone`
-
-Contains greenhouse zone information.
-
-### `dim_date`
-
-Contains date-related attributes.
-
-## Fact Table
-
-### `fact_growth`
-
-Stores greenhouse batch measurements including:
-
-- Plants planted
-- Plants lost
-- Water usage
-- Temperature
-- Species
-- Zone
-- Date
-
-A staging table was used before loading records into the warehouse.
-
-### `staging_growth`
-
-The staging dataset contains the original batch-level greenhouse records before transformation.
-
----
-
-# SQL Analysis
-
-SQL was used to clean, transform, classify, and analyze greenhouse production data.
-
-Key SQL techniques used include:
-
-- Aggregate functions
-- `GROUP BY`
-- `HAVING`
-- `CASE`
-- Views
-- CTEs
-- Window functions
-- Ranking
-- Risk classification
-
----
-
-# Risk Classification
-
-Batch risk was calculated using plant loss rate.
+**Final risk logic:**
 
 ```sql
-loss_rate_percent =
-plants_lost / plants_planted * 100
+CASE
+    WHEN (plants_lost::numeric / NULLIF(plants_planted, 0)) * 100 >= 10
+        THEN 'High Risk'
+    ELSE 'Low Risk'
+END
 ```
 
-Batches were classified as:
+| Classification | Rule |
+| --- | --- |
+| High Risk | Loss rate ≥ 10% |
+| Low Risk | Loss rate < 10% |
 
-```text
-High Risk: loss rate >= 10%
+The finished project uses **two** categories: High Risk and Low Risk. There is no Medium Risk category.
 
-Low Risk: loss rate < 10%
-```
+SQL techniques used include joins, aggregation, `CASE`, views, CTEs, and window functions for ranking.
 
-The analysis identified:
+### 5. Historical weather enrichment
 
-- **150 total batches**
-- **19 high-risk batches**
-- **6.80% average loss rate**
+A Python integration retrieves historical weather information for Jerusalem using the **Open-Meteo API**. Greenhouse batch records were enriched with outside temperature, humidity and precipitation information for the simulated production period (February–July 2026).
 
----
+Example enriched fields:
 
-# SQL Views
+- `outside_temperature_c`
+- `outside_humidity_percent`
+- `precipitation_mm`
 
-Several SQL views were created to support the analysis.
+The purpose is to investigate possible relationships between outside weather and greenhouse performance, not to establish causation.
 
-## `batch_risk_analysis`
+### 6. Exploratory machine learning
 
-Calculates batch loss rate and assigns a risk level.
+A Python/scikit-learn proof of concept explored classifying batches as High Risk or Low Risk using features such as greenhouse temperature and water usage. Logistic Regression was the primary model explored; Random Forest was also considered or tested during development.
 
-Important fields include:
+The dataset is small and imbalanced (**19 high-risk cases out of 150**). Model evaluations therefore serve as a learning exercise, **not** proof of reliable real-world predictive accuracy. The Power BI risk classification is based on the explicit observed-loss rule above, not a deployed ML scoring service.
 
-- `batch_id`
-- `loss_rate_percent`
-- `risk_level`
+## Dataset
 
----
+GrowSight analyzes **150 simulated production batches** across three species and zones.
 
-## `top_risk_batches_by_zone`
+| Species | Greenhouse zone |
+| --- | --- |
+| Tomato | North Glasshouse |
+| Cucumber | South Tunnel |
+| Pepper | Propagation Room |
 
-Ranks the highest-risk batches inside each greenhouse zone.
+Species and zones are separate dimensions; the table lists the three species and the three zone names for convenience, not one-to-one crop assignments.
 
-Window functions were used to rank batches and identify the top risk cases.
+Example batch fields include `batch_id`, crop species, zone, production date, plants planted, plants lost, irrigation volume, and greenhouse temperature.
 
----
+## Selected findings from the simulated data
 
-## `batch_risk_snapshot`
-
-Stores a snapshot of the batch risk analysis for reporting and dashboard use.
-
----
-
-# Temperature Analysis
-
-Temperature was grouped into categories to investigate its relationship with plant loss.
-
-Observed average loss rates:
-
-| Temperature Range | Average Loss Rate |
-|---|---:|
+| Temperature group | Average loss rate |
+| --- | ---: |
 | Under 20°C | 6.51% |
 | 20–25°C | 6.61% |
 | 25–30°C | 5.67% |
 | 30–35°C | 7.52% |
-| 35°C+ | 14.22% |
+| 35°C and above | 14.22% |
 
-The highest loss rate occurred when greenhouse temperatures exceeded **35°C**.
+The hottest temperature group had the highest observed average losses. This is a descriptive result of the simulated dataset; it does **not** demonstrate that heat caused those losses.
 
-This suggests extreme heat may be associated with increased crop loss in the simulated dataset.
-
----
-
-# Crop Analysis
-
-Average loss rate by species:
-
-| Species | Average Loss Rate |
-|---|---:|
+| Crop | Average loss rate |
+| --- | ---: |
 | Tomato | 5.60% |
 | Cucumber | 5.91% |
 | Pepper | 8.79% |
 
-Pepper showed the highest average plant loss rate among the three crops.
+Pepper showed the highest average loss rate in the reference data.
 
----
-
-# Weather API Integration
-
-GrowSight integrates external weather data using the **Open-Meteo API**.
-
-Weather data was retrieved for Jerusalem for the production period.
-
-The API provides:
-
-- Outside temperature
-- Precipitation
-- Relative humidity
-
-Python was used to retrieve and transform the API data before merging it with greenhouse batch records.
-
-The resulting dataset contains greenhouse measurements alongside external weather conditions.
-
-Example fields include:
+## System overview
 
 ```text
-outside_temperature_c
-outside_humidity_percent
-precipitation_mm
+Simulated greenhouse batches ──> PostgreSQL staging / warehouse ──> SQL risk analysis
+              │                                  │                      │
+              ├──> Python + Open-Meteo weather ──┘                      │
+              └──> Exploratory ML                                     │
+                                                                       v
+                                                                Power BI report
+                                                                       ^
+Python sensor simulator ──> PostgreSQL sensor_readings ──> latest zone temperature
+
+Power BI AskGrowSight custom visual ──> local Flask /ask API ──> Ollama (Qwen3 4B)
+                                            │
+                                            └──> PostgreSQL data queries
+
+Google BigQuery: additional analytical storage / SQL work during development
 ```
 
-This allows greenhouse performance to be compared with external environmental conditions.
-
----
-
-# Machine Learning
-
-A small machine-learning prototype was created to explore whether batch risk could be classified using environmental features.
-
-## Target
-
-A batch was classified as:
-
-```text
-1 = High Risk
-0 = Low Risk
-```
-
-High risk was defined as:
-
-```text
-loss_rate >= 10%
-```
-
-## Features
-
-The initial model used features including:
-
-- Greenhouse temperature
-- Irrigation / water usage
-
-## Models
-
-Two models were tested:
-
-- Logistic Regression
-- Random Forest
-
-The models were compared using:
-
-- Confusion matrix
-- Precision
-- Recall
-- Classification report
-
----
-
-# Machine Learning Limitations
-
-The machine-learning portion of GrowSight is intentionally a **proof of concept**.
-
-The dataset contains only 150 records and just 19 high-risk cases.
-
-This creates a significant class imbalance.
-
-Because of the limited dataset, the model should not be interpreted as a production-ready prediction system.
-
-Future versions of GrowSight could improve the model using:
-
-- Larger datasets
-- Additional environmental variables
-- Greenhouse humidity
-- Light levels
-- Soil measurements
-- Crop age
-- Fertilizer data
-- More historical growing cycles
-
----
-
-# Power BI Dashboard
-
-The GrowSight Power BI report provides an interactive interface for exploring greenhouse performance.
-
-The dashboard contains multiple pages.
-
----
-
-## Overview
-
-The Overview page provides high-level greenhouse performance metrics.
-
-Key KPIs include:
-
-- Total Batches
-- Batches Requiring Attention
-- Average Loss Rate
-
-Users can filter the dashboard using:
-
-- Species
-- Zone
-- Risk Level
-
----
-
-## Risk Drivers
-
-The Risk Drivers page allows users to explore relationships between environmental conditions and plant loss.
-
-One of the primary visualizations compares:
-
-```text
-Temperature
-vs.
-Loss Rate
-```
-
-This helps identify conditions associated with higher batch risk.
-
----
-
-## Batch Investigation
-
-The Batch Investigation page allows users to inspect individual greenhouse batches.
-
-Users can examine batch-level information including:
-
-- Species
-- Zone
-- Temperature
-- Irrigation
-- Loss rate
-- Risk classification
-
-This allows potentially problematic batches to be investigated in more detail.
-
----
-
-# Key Findings
-
-The analysis produced several notable observations.
-
-### 1. Extreme temperatures were associated with higher loss
-
-Batches exposed to temperatures above **35°C** had an average loss rate of approximately **14.22%**, substantially higher than other temperature ranges.
-
-### 2. Pepper had the highest average crop loss
-
-Pepper batches showed an average loss rate of approximately **8.79%**.
-
-### 3. Most batches were not classified as high risk
-
-Out of 150 batches:
-
-```text
-19 were classified as High Risk
-131 were classified as Low Risk
-```
-
-### 4. Environmental conditions may help identify risky batches
-
-Temperature and irrigation showed some relationship with plant loss, although the dataset is too small to make strong predictive conclusions.
-
----
-
-# Project Workflow
-
-The GrowSight workflow follows this process:
-
-```text
-Greenhouse Data
-      ↓
-PostgreSQL Staging
-      ↓
-Data Warehouse
-      ↓
-SQL Analysis
-      ↓
-BigQuery
-      ↓
-Python Analysis
-      ↓
-Weather API
-      ↓
-Machine Learning
-      ↓
-Power BI Dashboard
-```
-
----
-
-# Repository Structure
-
-A suggested GitHub repository structure:
-
-```text
-GrowSight/
-│
-├── README.md
-│
-├── data/
-│   ├── staging_growth.csv
-│   └── weather_enriched_growth.csv
-│
-├── sql/
-│   ├── create_tables.sql
-│   ├── insert_data.sql
-│   ├── risk_analysis.sql
-│   └── analysis_queries.sql
-│
-├── python/
-│   ├── weather_api.py
-│   └── ml_risk_model.py
-│
-├── powerbi/
-│   └── GrowSight.pbix
-│
-├── screenshots/
-│   ├── overview.png
-│   ├── risk_drivers.png
-│   └── batch_investigation.png
-│
-└── presentation/
-    └── GrowSight_Presentation.pdf
-```
-
----
-
-# How to Run the Project
-
-## 1. Database
-
-Create the PostgreSQL database and run the SQL scripts inside the `sql` directory.
-
-Example order:
-
-```text
-create_tables.sql
-insert_data.sql
-risk_analysis.sql
-analysis_queries.sql
-```
-
----
-
-## 2. Python Environment
-
-Install the required Python packages.
-
-```bash
-pip install pandas numpy scikit-learn requests
-```
-
----
-
-## 3. Weather API
-
-Run:
-
-```bash
-python weather_api.py
-```
-
-This retrieves weather data and merges it with the greenhouse batch dataset.
-
----
-
-## 4. Machine Learning
-
-Run:
-
-```bash
-python ml_risk_model.py
-```
-
-The script trains and evaluates the machine-learning models used in the proof-of-concept risk classification.
-
----
-
-## 5. Power BI
-
-Open:
-
-```text
-GrowSight.pbix
-```
-
-in Microsoft Power BI Desktop.
-
-Use the dashboard filters to explore batch performance by species, greenhouse zone, and risk level.
-
----
-
-# Future Improvements
-
-Future versions of GrowSight could include:
-
-- Real greenhouse sensor data
-- Larger historical datasets
-- Humidity monitoring
-- Soil moisture
-- Light intensity
-- Fertilizer information
-- Automated anomaly detection
-- Improved machine-learning models
-- Real-time greenhouse monitoring
-- Automated risk alerts
-
----
-
-# Project Purpose
-
-GrowSight was developed as a data analytics portfolio project demonstrating the ability to combine:
-
-- SQL
-- relational databases
-- dimensional modeling
-- Python
-- API integration
-- machine learning
-- data visualization
-- business-oriented analytics
-
-The project is designed to demonstrate an end-to-end analytical workflow rather than a production greenhouse management system.
+## Technology stack
+
+| Area | Technologies |
+| --- | --- |
+| Data preparation and simulation | Python, pandas, NumPy |
+| Database and analytics | PostgreSQL, SQL, Google BigQuery |
+| Data modeling | Staging tables, fact and dimension tables, SQL views |
+| Business intelligence | Microsoft Power BI, DAX |
+| Weather enrichment | Open-Meteo API, Python requests |
+| ML proof of concept | scikit-learn |
+| AI assistant | Flask, Ollama, Qwen3 4B, psycopg2 |
+| Dashboard AI interface | Power BI custom visual, TypeScript / Power BI visuals tooling |
+
+## Running the local prototype
+
+The complete project relies on local services and project files. These instructions describe the **intended local workflow**; a one-command public install is not provided.
+
+1. **Set up PostgreSQL.** Create the `growsight_warehouse` database, load the batch dataset, create the warehouse/risk-analysis objects, and create `sensor_readings`. Check that connection settings in the Python scripts match your local machine.
+2. **Install Python dependencies.** The components use packages including `pandas`, `numpy`, `requests`, `scikit-learn`, `flask`, `flask-cors`, and `psycopg2-binary`. Install only what is required by the scripts you run.
+3. **Run any batch-processing or weather-analysis scripts** needed to populate the local analytical data.
+4. **Start the sensor simulator** to write changing readings to PostgreSQL. The file used during development was `sensor_simulator.py`.
+5. **Install Ollama and the `qwen3:4b` model**, then ensure Ollama is running locally.
+6. **Start the Flask assistant API** (`growsight_api.py` during development) and confirm that its `/ask` endpoint can answer a test question.
+7. **Open the Power BI report** and confirm that its data connections, current-temperature card and AskGrowSight custom visual are configured for the local environment.
+
+The exact scripts, Power BI file, custom visual package, and database setup files must be included in the repository before someone else can reproduce the full demo. **Do not assume that the README alone provides a turnkey installation.**
+
+## Project limitations
+
+- Production batches and live readings are **simulated**, not collected from an operating greenhouse.
+- A batch is marked high risk **after** its observed loss percentage reaches 10%; this is not a forecast of future plant loss.
+- The live dashboard component demonstrated is the **temperature reading**; the remaining environmental parameters are not claimed to be live Power BI metrics.
+- The AI assistant runs through local services and only has the database access explicitly implemented in its code. Its answers should be checked before making growing decisions.
+- The ML experiment is not production-validated and has substantial sample-size and class-imbalance limitations.
+- The current prototype is intended for a local portfolio demonstration, not remote deployment or automatic actuation of greenhouse equipment.
+
+## Possible future extensions
+
+- Connect to physical greenhouse sensors.
+- Extend real-time reporting to humidity, pH, EC and other sensor signals.
+- Collect more historical batches and independently validate predictive models.
+- Add authenticated deployment, operational monitoring, and alerting.
+- Package a fully reproducible demo with setup scripts, anonymized sample data, screenshots, and a Power BI file.
+
+## Why I built GrowSight
+
+GrowSight applies data analytics to a real horticultural problem: translating scattered crop and environmental measurements into information growers can act on. The project combines hands-on greenhouse domain understanding with SQL, Python, dashboard development, simulated sensor integration, and practical work integrating a local language model into a data product.
+
+**The result is a completed end-to-end portfolio prototype showing how greenhouse operations data can support earlier investigation and more informed decisions.**
